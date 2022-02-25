@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 
+
 class Creature:
     def __init__(self, url: str, name: str):
         self.url = url

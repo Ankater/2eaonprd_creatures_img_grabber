@@ -13,7 +13,8 @@ if __name__ == '__main__':
     for letter in letters:
         data = letters[letter]
         path = f'creatures/{letter}'
-        print(f'Start parsing creatures for letter {letter}. There are {len(data)} creatures')
+        print(f'Start parsing creatures for letter {letter}. '
+              f'There are {len(data)} creatures')
 
         try:
             os.mkdir(path)
