@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import time
@@ -7,17 +8,13 @@ from bs4 import BeautifulSoup
 
 
 # TODO add normal logging
+# TODO add saving last position
 class AonprdGrabber:
     __url = "https://2e.aonprd.com/"
     __get = "AspxAutoDetectCookieSupport=1"
-    __uri_monster = "Monsters.aspx"
-    __uri_npc = "NPCs.aspx"
-    __curr_id = 1
     __path_base = 'creatures'
-    __fail_counter = 0
 
-    MAX_FAILS = 500
-    MAX_REQUEST_ATTEMPTS = 10
+    MAX_REQUEST_ATTEMPTS = 5
     TIMEOUT = 5
     TIMEOUT_STREAM = 20
     SLEEP_TIME = 5
@@ -31,7 +28,6 @@ class AonprdGrabber:
         self.__session = requests.Session()
 
     def __get_html(self, url: str):
-        # TODO add time limit for requests
         print(url)
         url = url.replace('\\', '/')
         if url.find('?') > 0:
@@ -49,22 +45,17 @@ class AonprdGrabber:
 
         return html
 
-    def save_creature(self):
-        html = self.__get_creature_page()
-        self.__curr_id += 1
+    def save_creature(self, url: str):
+        html = self.__get_creature_page(url)
         if html is None:
-            print(f'Can`t find creatue №{self.__curr_id - 1}')
-            self.__fail_counter += 1
-            if self.__fail_counter >= self.MAX_FAILS:
-                return None
-            else:
-                return True
+            print(f'Can`t find creatue {url}')
+            return True
 
         soup = BeautifulSoup(html, 'html.parser')
         main = soup.find('div', id='main')
         title = main.find('h1', {'class': 'title'})
         if title is None:
-            print(f'Can`t find name for creatue №{self.__curr_id - 1}')
+            print(f'Can`t find name for creatue {url}')
             return None
 
         creature_name = title.text
@@ -73,6 +64,9 @@ class AonprdGrabber:
             print(f'Image has found for {creature_name}')
             dir_name = creature_name[0].upper()
             path = self.__make_path(dir_name)
+            file_path = f'{path}/{creature_name}.jpg'
+            if os.path.exists(file_path):
+                return True
 
             src = img.get('src')
             img_url = f'{self.__url}{src}'
@@ -96,13 +90,9 @@ class AonprdGrabber:
 
         return True
 
-    def __get_creature_page(self):
-        id_str = f'?ID={self.__curr_id}'
-        creature_url = f'{self.__url}{self.__uri_monster}{id_str}'
+    def __get_creature_page(self, url: str):
+        creature_url = f'{self.__url}{url}'
         html = self.__get_html(creature_url)
-        if html is None:
-            npc_url = f'{self.__url}{self.__uri_npc}{id_str}'
-            html = self.__get_html(npc_url)
 
         return html
 
@@ -138,10 +128,49 @@ class AonprdGrabber:
                 print(request_attempts)
                 time.sleep(self.SLEEP_TIME)
 
-            except ConnectionError as e:
+            except requests.exceptions.ConnectionError as e:
                 print(e.strerror)
                 request_attempts += 1
                 print(request_attempts)
                 time.sleep(self.SLEEP_TIME)
 
         return response
+
+    def save_images(self):
+        creatures = self.get_creatures_list()
+        for creature in creatures:
+            source = creature.get('_source')
+            if source is None:
+                continue
+            url = source.get('url')
+            if type(url) is not str:
+                continue
+
+            self.save_creature(url)
+
+    def get_creatures_list(self):
+        url = 'https://elasticsearch.aonprd.com/aon/_search?track_total_hits=true'
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0',
+            'Accept': '*/*',
+            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Content-Type': 'application/json',
+            'Origin': 'https://2e.aonprd.com',
+            'Connection': 'keep-alive',
+            'Referer': 'https://2e.aonprd.com/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site'
+        }
+        data = '{"query":{"function_score":{"query":{"bool":{"filter":[{"query_string":{"query":"category:creature","default_operator":"AND","fields":["name","text^0.1","trait_raw","type"]}}]}},"boost_mode":"multiply","functions":[{"filter":{"terms":{"type":["Ancestry","Class"]}},"weight":1.1},{"filter":{"terms":{"type":["Trait"]}},"weight":1.05}]}},"size":10000,"sort":[{"name.keyword":{"order":"asc"}},"_doc"],"_source":{"excludes":["text"]}}'
+
+        response = requests.post(url, headers=headers, data=data)
+        if response.status_code != 200:
+            return []
+
+        data = json.loads(response.text)
+        hits = data.get('hits', [])
+        if type(hits) is not dict:
+            return []
+        return hits.get('hits', [])
