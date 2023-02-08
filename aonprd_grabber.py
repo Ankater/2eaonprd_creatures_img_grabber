@@ -1,4 +1,6 @@
 import json
+import logging
+import logging.config
 import os
 import socket
 import time
@@ -6,10 +8,12 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
+logging.config.fileConfig('logging.conf')
+
 
 # TODO add normal logging
-# TODO add saving last position
 class AonprdGrabber:
+    logger: logging.Logger
     __url = "https://2e.aonprd.com/"
     __get = "AspxAutoDetectCookieSupport=1"
     __path_base = 'creatures'
@@ -20,15 +24,16 @@ class AonprdGrabber:
     SLEEP_TIME = 5
 
     def __init__(self) -> None:
+        self.logger = logging.getLogger('2eaonprd')
         if not os.path.exists(self.__path_base):
             try:
                 os.mkdir(self.__path_base)
             except FileExistsError as exc:
-                print(exc)
+                self.logger.error(exc.strerror)
         self.__session = requests.Session()
 
     def __get_html(self, url: str):
-        print(url)
+        self.logger.info(url)
         url = url.replace('\\', '/')
         if url.find('?') > 0:
             fin_url = f'{url}&{self.__get}'
@@ -41,52 +46,53 @@ class AonprdGrabber:
 
         html = response.content
         if response.apparent_encoding is None:
-            print('broken encoding')
+            self.logger.error('broken encoding')
 
         return html
 
     def save_creature(self, url: str):
         html = self.__get_creature_page(url)
         if html is None:
-            print(f'Can`t find creatue {url}')
+            self.logger.info(f'Can`t find creatue {url}')
             return True
 
         soup = BeautifulSoup(html, 'html.parser')
         main = soup.find('div', id='main')
         title = main.find('h1', {'class': 'title'})
         if title is None:
-            print(f'Can`t find name for creatue {url}')
+            self.logger.info(f'Can`t find name for creatue {url}')
             return None
 
         creature_name = title.text
         img = soup.find('img', {'class': 'thumbnail'})
         if img is not None:
-            print(f'Image has found for {creature_name}')
+            self.logger.info(f'Image has found for {creature_name}')
             dir_name = creature_name[0].upper()
             path = self.__make_path(dir_name)
             file_path = f'{path}/{creature_name}.jpg'
             if os.path.exists(file_path):
+                self.logger.info('img already exists')
                 return True
 
             src = img.get('src')
             img_url = f'{self.__url}{src}'
 
-            print('start downloading img')
+            self.logger.info('start downloading img')
             with open(f'{path}/{creature_name}.jpg', 'wb') as handler:
                 # response = requests.get(img_url, stream=True)
                 response = self.__request_get(img_url, True)
 
                 if not response.ok:
-                    print(response)
+                    self.logger.debug(response)
 
                 for block in response.iter_content(1024):
                     if not block:
                         break
 
                     handler.write(block)
-            print('stop downloading img')
+            self.logger.info('stop downloading img')
         else:
-            print(f'Image has not found for {creature_name}')
+            self.logger.info(f'Image has not found for {creature_name}')
 
         return True
 
@@ -102,7 +108,7 @@ class AonprdGrabber:
             try:
                 os.mkdir(path)
             except FileExistsError as exc:
-                print(exc)
+                self.logger.error(exc)
 
         return path
 
@@ -117,21 +123,21 @@ class AonprdGrabber:
                     response = requests.get(fin_url, timeout=self.TIMEOUT)
                 break
             except requests.Timeout as e:
-                print(e.strerror)
+                self.logger.error(e.strerror)
                 request_attempts += 1
-                print(request_attempts)
+                self.logger.debug(request_attempts)
                 time.sleep(self.SLEEP_TIME)
 
             except socket.timeout as e:
-                print(e.strerror)
+                self.logger.error(e.strerror)
                 request_attempts += 1
-                print(request_attempts)
+                self.logger.debug(request_attempts)
                 time.sleep(self.SLEEP_TIME)
 
             except requests.exceptions.ConnectionError as e:
-                print(e.strerror)
+                self.logger.error(e.strerror)
                 request_attempts += 1
-                print(request_attempts)
+                self.logger.debug(request_attempts)
                 time.sleep(self.SLEEP_TIME)
 
         return response
